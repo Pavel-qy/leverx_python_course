@@ -28,18 +28,27 @@ def parse_arguments():
 
 class Combining:
     def __init__(self, format: str, students_path: str, rooms_path: str):
-        self.format = Combining.check_format(format)
+        self.format, self.serialize = Combining.get_serialize(format.lower())
         self.students_path = Combining.check_file_path(students_path)
         self.rooms_path = Combining.check_file_path(rooms_path)
 
     @staticmethod
-    def check_format(format: str) -> str or ValueError:
-        supported_formats = ["json", "xml"]
-        if format.lower() in supported_formats:
-            return format.lower()
+    def get_serialize(format):
+        if format == "json":
+            return format, Combining.serialize_to_json
+        elif format == "xml":
+            return format, Combining.serialize_to_xml
         else:
             raise ValueError(f"'{format} - unsupported format'")
-    
+
+    @staticmethod
+    def serialize_to_json(combined_list: list, file) -> None:
+        json.dump(combined_list, file, indent=4)
+        
+    @staticmethod
+    def serialize_to_xml(combined_list: list, file) -> None:
+        file.write(dict2xml(combined_list, wrap="room"))
+   
     @staticmethod
     def check_file_path(path: str) -> str or ValueError:
         if os.path.isfile(path):
@@ -54,32 +63,25 @@ def read_json(path) -> list:
     return data
 
 
-def combine_lists(format: str, students_list: list, rooms_list: list) -> list:
-    dictionary_key = "student" if format == "xml" else "students"
+def combine_lists(students_list: list, rooms_list: list) -> list:
     for student in students_list:
-        try:
-            room_index = student["room"]
-            del student["room"]
-            rooms_list[room_index][dictionary_key].append(student)
-        except KeyError:
-            rooms_list[room_index][dictionary_key] = [student]
+        room_index = student["room"]
+        del student["room"]
+        rooms_list[room_index].setdefault("students", []).append(student)
     return rooms_list
 
 
-def create_file(format: str, combined_list: list) -> None:
-    with open(f"rooms_with_students.{format}", "w") as file:
-        if format == "json":
-            json.dump(combined_list, file, indent=4)
-        elif format == "xml":
-            file.write(dict2xml(combined_list, wrap="room"))
+def create_file(combined_list: list, combined) -> None:
+    with open(f"rooms_with_students.{combined.format}", "w") as file:
+        combined.serialize(combined_list, file)
 
 
 def main():
     combined = Combining(*parse_arguments())
     students_list = read_json(combined.students_path)
     rooms_list = read_json(combined.rooms_path)
-    combined_list = combine_lists(combined.format, students_list, rooms_list)
-    create_file(combined.format, combined_list)
+    combined_list = combine_lists(students_list, rooms_list)
+    create_file(combined_list, combined)
 
 
 if __name__ == "__main__":
