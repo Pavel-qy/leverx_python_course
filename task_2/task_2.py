@@ -4,7 +4,7 @@ from functools import total_ordering
 
 @total_ordering
 class Version:
-    maturity_options = {
+    _maturity_options = {
         0.25: ("sr", "service-release", "service_release"),
         -0.25: ("rc", "release-candidate", "release_candidate"),
         -0.5: ("b", "beta"),
@@ -18,12 +18,12 @@ class Version:
     def __eq__(self, other):
         other_scraped_version = Version.scrape_numbers(other.version)
         result = Version.compare_version_lists(self.scraped_version, other_scraped_version)
-        return True if result == 0 else False
+        return result == 0
 
     def __lt__(self, other):
         version_other = Version.scrape_numbers(other.version)
         result = Version.compare_version_lists(self.scraped_version, version_other)
-        return True if result < 0 else False
+        return result < 0
 
     @staticmethod
     def scrape_numbers(version: str) -> list:
@@ -104,7 +104,7 @@ class Version:
         raw_number : int
             the sum of the rank value and the corresponding maturity value
         """
-        for value, maturity_names in Version.maturity_options.items():
+        for value, maturity_names in Version._maturity_options.items():
             if maturity in maturity_names:
                 raw_number += value
                 return raw_number
