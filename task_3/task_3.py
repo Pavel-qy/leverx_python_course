@@ -5,6 +5,88 @@ from dict2xml import dict2xml
 from mysql.connector import connect, Error
 
 
+TABLES = {
+    "rooms": {
+        "table_creation": """
+        CREATE TABLE rooms(
+            id SMALLINT UNSIGNED PRIMARY KEY,
+            name VARCHAR(20)
+            )
+        """,
+        "table_filling": """
+        INSERT INTO rooms
+        (id, name)
+        VALUES ( %(id)s, %(name)s )
+        """,
+        "index_creation": "CREATE INDEX name_id ON rooms(id, name)",
+    },
+    "students": {
+        "table_creation": """
+        CREATE TABLE students(
+            birthday DATE,
+            id SMALLINT UNSIGNED PRIMARY KEY,
+            name VARCHAR(50),
+            room SMALLINT UNSIGNED,
+            sex CHAR(1),
+            FOREIGN KEY(room) REFERENCES rooms(id)
+            )
+        """,
+        "table_filling": """
+        INSERT INTO students
+            (birthday, id, name, room, sex)
+            VALUES ( %(birthday)s, %(id)s, %(name)s, %(room)s, %(sex)s )
+        """,
+        "index_creation": "CREATE INDEX sex ON students(sex)",
+    },
+}
+
+
+QUERIES = {
+    "students_count": """
+    SELECT rooms.name, COUNT(students.name)
+    FROM rooms
+    JOIN students
+    ON students.room = rooms.id
+    GROUP BY rooms.name
+    """,
+    "smallest_average_age": """
+    SELECT rooms.name
+    FROM rooms
+    JOIN students
+    ON students.room = rooms.id
+    GROUP BY rooms.name
+    ORDER BY AVG(students.birthday) DESC
+    LIMIT 5
+    """,
+    "biggest_age_diffrence": """
+    SELECT rooms.name
+    FROM rooms
+    JOIN students
+    ON students.room = rooms.id
+    GROUP BY rooms.name
+    ORDER BY MAX(students.birthday) - MIN(students.birthday) DESC
+    LIMIT 5
+    """,
+    "defferent_sex_students": """
+    SELECT rooms.name
+    FROM rooms
+    JOIN students
+    ON students.room = rooms.id
+    WHERE rooms.name IN (
+        SELECT rooms.name
+        FROM rooms
+        JOIN students
+        ON students.room = rooms.id
+        WHERE students.sex = 'M'
+        GROUP BY rooms.name
+        HAVING COUNT(students.sex) > 0
+        ) AND students.sex = 'F'
+    GROUP BY rooms.name
+    HAVING COUNT(students.sex) > 0
+    """
+}
+
+
 def parse_arguments():
     parser = argparse.ArgumentParser(description="MySQL Query Script")
     parser.add_argument(
@@ -47,7 +129,9 @@ class Table:
     def __init__(self, path: str):
         self.path = Table.check_file_path(path)
         self.name = os.path.basename(self.path).split(".")[0].lower()
-        self.table_creation, self.table_filling, self.index = Table.define_query(self.name)
+        self.table_creation = TABLES[self.name]["table_creation"]
+        self.table_filling = TABLES[self.name]["table_filling"]
+        self.index_creation = TABLES[self.name]["index_creation"]
 
     @staticmethod
     def check_file_path(path: str) -> str or ValueError:
@@ -55,54 +139,11 @@ class Table:
             return path
         else:
             raise ValueError("invalid file path")
-    
-    @staticmethod
-    def define_query(name: str) -> tuple[str, str, str]:
-        if name == "rooms":
-            table_creation = (
-                """
-                CREATE TABLE rooms(
-                    id SMALLINT UNSIGNED PRIMARY KEY,
-                    name VARCHAR(20)
-                    )
-                """
-            )
-            table_filling = (
-                """
-                INSERT INTO rooms
-                (id, name)
-                VALUES ( %(id)s, %(name)s )
-                """
-            )
-            index = "CREATE INDEX name_id ON rooms(id, name)"
-            return table_creation, table_filling, index
-        elif name == "students":
-            table_creation = (
-                """
-                CREATE TABLE students(
-                    birthday DATE,
-                    id SMALLINT UNSIGNED PRIMARY KEY,
-                    name VARCHAR(50),
-                    room SMALLINT UNSIGNED,
-                    sex CHAR(1),
-                    FOREIGN KEY(room) REFERENCES rooms(id)
-                    )
-                """
-            )
-            table_filling = (
-                """
-                INSERT INTO students
-                (birthday, id, name, room, sex)
-                VALUES ( %(birthday)s, %(id)s, %(name)s, %(room)s, %(sex)s )
-                """
-            )
-            index = "CREATE INDEX sex ON students(sex)"
-            return table_creation, table_filling, index
-    
+
 
 def db_connection(user:str, password:str, host:str, database:str=None) -> None:
     def decorator(func):
-        def wrapper(db_name, *args):
+        def wrapper(*args):
             try:
                 with connect(
                     host=host, 
@@ -111,7 +152,7 @@ def db_connection(user:str, password:str, host:str, database:str=None) -> None:
                     database=database
                     ) as connection:
                     with connection.cursor() as cursor:
-                        return func(connection, cursor, db_name, *args)
+                        return func(connection, cursor, *args)
             except Error as exc:
                 print(exc)
         return wrapper
@@ -132,87 +173,48 @@ def create_db(username: str, password: str, host:str, db_name: str, *args) -> No
             with open(table.path, "r") as file:
                 json_file = json.load(file)
             cursor.executemany(table.table_filling, json_file)
-            cursor.execute(table.index)
+            cursor.execute(table.index_creation)
             connection.commit()
     wrapped(db_name, *args)
 
 
-class Query:
-    def __init__(self, format: str):
-        self.format, self.serialize = Query.get_serialize(format.lower())
-        self.queries = {
-            "students_count": """
-            SELECT rooms.name, COUNT(students.name)
-            FROM rooms
-            JOIN students
-            ON students.room = rooms.id
-            GROUP BY rooms.name
-            """,
-            "smallest_average_age": """
-            SELECT rooms.name
-            FROM rooms
-            JOIN students
-            ON students.room = rooms.id
-            GROUP BY rooms.name
-            ORDER BY AVG(students.birthday) DESC
-            LIMIT 5
-            """,
-            "biggest_age_diffrence": """
-            SELECT rooms.name
-            FROM rooms
-            JOIN students
-            ON students.room = rooms.id
-            GROUP BY rooms.name
-            ORDER BY MAX(students.birthday) - MIN(students.birthday) DESC
-            LIMIT 5
-            """,
-            "defferent_sex_students": """
-            SELECT rooms.name
-            FROM rooms
-            JOIN students
-            ON students.room = rooms.id
-            WHERE rooms.name IN (
-                SELECT rooms.name
-                FROM rooms
-                JOIN students
-                ON students.room = rooms.id
-                WHERE students.sex = 'M'
-                GROUP BY rooms.name
-                HAVING COUNT(students.sex) > 0
-                ) AND students.sex = 'F'
-            GROUP BY rooms.name
-            HAVING COUNT(students.sex) > 0
-            """
-        }
-
+class Serializer:
+    def __init__(self, format: str) -> None:
+        self.serialize = Serializer.get_serialize(format.lower())
+    
     @staticmethod
     def get_serialize(format: str):
         if format == "json":
-            return format, Query.serialize_to_json
+            return Serializer.serialize_to_json
         elif format == "xml":
-            return format, Query.serialize_to_xml
+            return Serializer.serialize_to_xml
         else:
             raise ValueError(f"'{format}' - invalid output format")
 
     @staticmethod
-    def serialize_to_json(combined_list: list, file) -> None:
-        json.dump(combined_list, file, indent=4)
+    def serialize_to_json(file_name: str, processed_selection: list) -> None:
+        with open(f"{file_name}.json", "w") as file:
+            json.dump(processed_selection, file, indent=4)
         
     @staticmethod
-    def serialize_to_xml(combined_list: list, file) -> None:
-        file.write(dict2xml(combined_list, wrap="room"))
-   
-    
-def unload_selection(username: str, password: str, host: str, db_name: str, query):
+    def serialize_to_xml(file_name: str, processed_selection: list) -> None:
+        with open(f"{file_name}.xml", "w") as file:
+            file.write(dict2xml(processed_selection, wrap="room"))
+
+
+def process_selection(selection: list) -> list:
+    return [{i[0]: i[1]} if len(i) == 2 else i[0] for i in selection]
+
+
+def unload_selection(username: str, password: str, host: str, db_name: str, write_data) -> None:
     @db_connection(username, password, host, db_name)
-    def wrapped(connection, cursor, query):
-        for filename, query_content in query.queries.items():
+    def wrapped(connection, cursor, write_data):
+        for filename, query_content in QUERIES.items():
             cursor.execute(query_content)
             selection = cursor.fetchall()
-            result_list = [{i[0]: i[1]} if len(i) == 2 else i[0] for i in selection]
-            with open(f"{filename}.{query.format}", "w") as file:
-                query.serialize(result_list, file)
-    wrapped(query)
+            processed_selection = process_selection(selection)
+            write_data(filename, processed_selection)
+    wrapped(write_data)
 
 
 def main():
@@ -222,8 +224,7 @@ def main():
     rooms_table = Table(rooms_path)
     students_table = Table(students_path)
     create_db(username, password, host, db_name, rooms_table, students_table)
-    query = Query(format)
-    unload_selection(username, password, host, db_name, query)
+    unload_selection(username, password, host, db_name, Serializer(format).serialize)
 
 
 if __name__ == "__main__":
